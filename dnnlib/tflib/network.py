@@ -360,6 +360,7 @@ class Network:
             minibatch_size: int = None,
             num_gpus: int = 1,
             assume_frozen: bool = False,
+            custom_inputs=None,
             **dynamic_kwargs) -> Union[np.ndarray, Tuple[np.ndarray, ...], List[np.ndarray]]:
         """Run this network for the given NumPy array(s), and return the output(s) as NumPy array(s).
 
@@ -376,6 +377,7 @@ class Network:
             num_gpus:           Number of GPUs to use.
             assume_frozen:      Improve multi-GPU performance by assuming that the trainable parameters will remain changed between calls.
             dynamic_kwargs:     Additional keyword arguments to be passed into the network build function.
+            custom_inputs:      Allow to use another Tensor as input instead of default Placeholders
         """
         assert len(in_arrays) == self.num_inputs
         assert not all(arr is None for arr in in_arrays)
@@ -399,9 +401,14 @@ class Network:
         # Build graph.
         if key not in self._run_cache:
             with tfutil.absolute_name_scope(self.scope + "/_Run"), tf.control_dependencies(None):
-                with tf.device("/cpu:0"):
-                    in_expr = [tf.placeholder(tf.float32, name=name) for name in self.input_names]
-                    in_split = list(zip(*[tf.split(x, num_gpus) for x in in_expr]))
+                if custom_inputs is not None:
+                    with tf.device("/gpu:0"):
+                        in_expr = [input_builder(name) for input_builder, name in zip(custom_inputs, self.input_names)]
+                        in_split = list(zip(*[tf.split(x, num_gpus) for x in in_expr]))
+                else:
+                    with tf.device("/cpu:0"):
+                        in_expr = [tf.placeholder(tf.float32, name=name) for name in self.input_names]
+                        in_split = list(zip(*[tf.split(x, num_gpus) for x in in_expr]))
 
                 out_split = []
                 for gpu in range(num_gpus):
